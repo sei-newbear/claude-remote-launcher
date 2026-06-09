@@ -19,7 +19,7 @@ Usage:
   claude-launcher.sh send   <name> <text>  起動中セッションにプロンプト送信 (Enter 付き)
   claude-launcher.sh log    <name>         セッションの画面ログ (制御コード除去) を表示
   claude-launcher.sh list                  起動中セッション一覧
-  claude-launcher.sh stop   <name>         セッション停止 + 後片付け
+  claude-launcher.sh stop   <name>         セッション停止 + 後片付け (消えてから返る = 呼び出し後の再確認は不要)
 USAGE
 }
 
