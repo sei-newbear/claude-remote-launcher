@@ -17,13 +17,13 @@ description: Launch and drive a background, mobile-accessible Claude Code sessio
 
 ## 使い方
 
-スクリプト `scripts/claude-launcher.sh` を呼ぶ:
+スクリプト `.claude/skills/claude-launcher/scripts/claude-launcher.sh` を呼ぶ:
 
-- 起動: `scripts/claude-launcher.sh launch <名前> [作業dir]`
-- 送信: `scripts/claude-launcher.sh send <名前> "プロンプト"`
-- 応答確認: `scripts/claude-launcher.sh log <名前>`(画面ログを制御コード除去して表示)
-- 一覧: `scripts/claude-launcher.sh list`
-- 停止+片付け: `scripts/claude-launcher.sh stop <名前>`
+- 起動: `.claude/skills/claude-launcher/scripts/claude-launcher.sh launch <名前> [作業dir]`
+- 送信: `.claude/skills/claude-launcher/scripts/claude-launcher.sh send <名前> "プロンプト"`
+- 応答確認: `.claude/skills/claude-launcher/scripts/claude-launcher.sh log <名前>`(画面ログを制御コード除去して表示)
+- 一覧: `.claude/skills/claude-launcher/scripts/claude-launcher.sh list`
+- 停止+片付け: `.claude/skills/claude-launcher/scripts/claude-launcher.sh stop <名前>`
 
 起動後 `log` に `Remote Control active` が出たら、claude.ai のモバイル/web から `<名前>` セッションに接続できる。
 
@@ -31,4 +31,5 @@ description: Launch and drive a background, mobile-accessible Claude Code sessio
 
 - 必ず `--remote-control`(interactive)。`-p` を付けると従量側に乗る
 - 応答取得は TUI 画面ログのデコード。構造化された結果が要るなら transcript(`~/.claude/projects/...`)を直接読む
-- `stop` は best-effort(プロセス名 / PID で kill)。複数同時起動時は名前で区別する
+- `send` 後は応答/処理開始を確認してから次を送る(FIFO 送信は稀に submit されず未送信になる。連投すると入力が混線する)
+- `stop` はプロセスグループごと kill + タイムアウト監視で、実際に終了してから返す(残れば SIGKILL)。複数同時起動時は名前で区別する

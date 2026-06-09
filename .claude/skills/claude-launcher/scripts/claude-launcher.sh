@@ -37,7 +37,7 @@ cmd_launch() {
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   # pty を与えて claude を detached 起動。stdin は FIFO、画面は log に記録
-  setsid bash -c "cd '$dir' && exec script -qfc 'claude --remote-control $name' '$log' < '$fifo'" >/dev/null 2>&1 &
+  setsid bash -c "cd '$dir' && exec script -qfc 'claude --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
   echo "launched '$name' (dir=$dir)"
@@ -49,7 +49,8 @@ cmd_send() {
   local name="$1"; shift
   local fifo="$STATE/$name.pipe"
   [ -p "$fifo" ] || { echo "ERROR: '$name' は起動していない" >&2; exit 1; }
-  printf '%s\r' "$*" > "$fifo"
+  printf '\025' > "$fifo"          # 入力ボックスをクリア (Ctrl-U): 前の未送信プロンプトとの混線を防ぐ
+  printf '%s\r' "$*" > "$fifo"     # プロンプト + Enter
   echo "sent to '$name': $*"
 }
 
@@ -70,14 +71,17 @@ cmd_list() {
 cmd_stop() {
   local name="$1"
   local pidf="$STATE/$name.pids"
-  # 記録した holder / script を、それぞれのプロセスグループごと kill (setsid でグループリーダー)。
-  # pkill -f は使わない (制御側コマンドラインに名前が含まれると自分を殺す事故があるため)。
+  # 記録した holder / script をプロセスグループごと SIGTERM (setsid でグループリーダー)。pkill -f は自爆事故があるので使わない。
   if [ -f "$pidf" ]; then
     local p
-    for p in $(cat "$pidf"); do
-      kill -- "-$p" 2>/dev/null || true
-    done
+    for p in $(cat "$pidf"); do kill -- "-$p" 2>/dev/null || true; done
   fi
+  # 終了をタイムアウト付きで監視し、残れば SIGKILL。stop は実際に消えてから返す。
+  alive_pids() { ps -eo pid,comm,args | awk -v n="$name" '$2=="claude" && $0 ~ ("remote-control " n "([[:space:]]|$)") {print $1}'; }
+  local i
+  for i in $(seq 1 20); do [ -z "$(alive_pids)" ] && break; sleep 0.5; done
+  local left; left="$(alive_pids)"
+  [ -n "$left" ] && kill -9 $left 2>/dev/null || true
   rm -f "$STATE/$name.pipe" "$STATE/$name.log" "$pidf"
   echo "stopped & cleaned '$name'"
 }
