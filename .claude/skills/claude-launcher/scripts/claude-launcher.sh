@@ -9,7 +9,8 @@
 #   - `--remote-control <name>` でリレー登録 → claude.ai / モバイルから同セッションを操作可能
 set -euo pipefail
 
-STATE="${CLAUDE_LAUNCHER_STATE:-$HOME/.claude-launcher}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="${CLAUDE_LAUNCHER_STATE:-$SCRIPT_DIR/../run}"
 mkdir -p "$STATE"
 
 usage() {
@@ -25,8 +26,13 @@ USAGE
 
 require() { command -v "$1" >/dev/null || { echo "ERROR: '$1' が必要" >&2; exit 1; }; }
 
+validate_name() {
+  [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ERROR: name は英数字・ハイフン・アンダースコアのみ使えます: '$1'" >&2; exit 1; }
+}
+
 cmd_launch() {
   local name="$1" dir="${2:-$PWD}"
+  validate_name "$name"
   require script; require claude; require setsid
   local fifo="$STATE/$name.pipe"
   local log="$STATE/$name.log"
@@ -47,6 +53,7 @@ cmd_launch() {
 
 cmd_send() {
   local name="$1"; shift
+  validate_name "$name"
   local fifo="$STATE/$name.pipe"
   [ -p "$fifo" ] || { echo "ERROR: '$name' は起動していない" >&2; exit 1; }
   printf '\025' > "$fifo"          # 入力ボックスをクリア (Ctrl-U): 前の未送信プロンプトとの混線を防ぐ
@@ -56,6 +63,7 @@ cmd_send() {
 
 cmd_log() {
   local name="$1"
+  validate_name "$name"
   local log="$STATE/$name.log"
   [ -f "$log" ] || { echo "ERROR: log なし: $log" >&2; exit 1; }
   sed -r "s/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g; s/\r/\n/g" "$log" | grep -avE '^[[:space:]]*$' || true
@@ -70,6 +78,7 @@ cmd_list() {
 
 cmd_stop() {
   local name="$1"
+  validate_name "$name"
   local pidf="$STATE/$name.pids"
   # 記録した holder / script をプロセスグループごと SIGTERM (setsid でグループリーダー)。pkill -f は自爆事故があるので使わない。
   if [ -f "$pidf" ]; then
