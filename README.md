@@ -1,6 +1,6 @@
 # claude-remote-launcher
 
-手元のマシンで Claude Code セッションをバックグラウンド起動して、web やモバイルアプリからどこでも操作できるようにする Claude Code skill。
+Claude Code から別の Claude Code セッションをバックグラウンドで起動する skill。起動したセッションはスマホや web からどこでも操作できる。
 
 ## 使い方
 
