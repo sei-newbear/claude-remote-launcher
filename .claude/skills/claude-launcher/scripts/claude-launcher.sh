@@ -20,7 +20,7 @@ Usage:
   claude-launcher.sh send   <name> <text>  起動中セッションにプロンプト送信 (Enter 付き)
   claude-launcher.sh log    <name>         セッションの画面ログ (制御コード除去) を表示
   claude-launcher.sh list                  起動中セッション一覧
-  claude-launcher.sh stop   <name>         セッション停止 + 後片付け (消えてから返る = 呼び出し後の再確認は不要)
+  claude-launcher.sh stop   <name>         /exit で graceful 終了を試み、タイムアウトなら kill。log は残す
 USAGE
 }
 
@@ -79,20 +79,34 @@ cmd_list() {
 cmd_stop() {
   local name="$1"
   validate_name "$name"
+  local fifo="$STATE/$name.pipe"
   local pidf="$STATE/$name.pids"
-  # 記録した holder / script をプロセスグループごと SIGTERM (setsid でグループリーダー)。pkill -f は自爆事故があるので使わない。
+  local log="$STATE/$name.log"
+  alive_pids() { ps -eo pid,comm,args | awk -v n="$name" '$2=="claude" && $0 ~ ("remote-control " n "([[:space:]]|$)") {print $1}'; }
+  # まず /exit を送って graceful shutdown を試みる (最大 10 秒待つ)
+  if [ -p "$fifo" ] && [ -n "$(alive_pids)" ]; then
+    printf '\025' > "$fifo"
+    printf '/exit\r' > "$fifo"
+    for i in $(seq 1 20); do [ -z "$(alive_pids)" ] && break; sleep 0.5; done
+  fi
+  # まだ生きていれば SIGTERM → SIGKILL にフォールバック (pkill -f は自爆事故があるので使わない)
+  if [ -n "$(alive_pids)" ]; then
+    if [ -f "$pidf" ]; then
+      local p
+      for p in $(cat "$pidf"); do kill -- "-$p" 2>/dev/null || true; done
+    fi
+    for i in $(seq 1 20); do [ -z "$(alive_pids)" ] && break; sleep 0.5; done
+    local left; left="$(alive_pids)"
+    [ -n "$left" ] && kill -9 $left 2>/dev/null || true
+  fi
+  # holder (sleep infinity) 等の残存プロセスを片付ける
   if [ -f "$pidf" ]; then
     local p
     for p in $(cat "$pidf"); do kill -- "-$p" 2>/dev/null || true; done
   fi
-  # 終了をタイムアウト付きで監視し、残れば SIGKILL。stop は実際に消えてから返す。
-  alive_pids() { ps -eo pid,comm,args | awk -v n="$name" '$2=="claude" && $0 ~ ("remote-control " n "([[:space:]]|$)") {print $1}'; }
-  local i
-  for i in $(seq 1 20); do [ -z "$(alive_pids)" ] && break; sleep 0.5; done
-  local left; left="$(alive_pids)"
-  [ -n "$left" ] && kill -9 $left 2>/dev/null || true
-  rm -f "$STATE/$name.pipe" "$STATE/$name.log" "$pidf"
-  echo "stopped & cleaned '$name'"
+  rm -f "$fifo" "$pidf"
+  echo "stopped '$name'"
+  [ -f "$log" ] && echo "  log : $log"
 }
 
 [ $# -ge 1 ] || { usage; exit 1; }
