@@ -125,22 +125,30 @@ cmd_log() {
 
 cmd_list() {
   shopt -s nullglob
-  local found=0 p n sid sessf
+  local found=0 p n sid sdir sessf log mark when
   declare -A seen
+  # name を受けて 1 行表示 ($1=mark ● or ○)
+  print_entry() {
+    local mark="$1" n="$2" sid="" sdir="" when=""
+    local sessf="$STATE/$n.session" log="$STATE/$n.log"
+    [ -f "$sessf" ] && { read -r sid < "$sessf"; sdir=$(sed -n '2p' "$sessf"); }
+    [ -f "$log" ] && when=$(date -r "$log" "+%m/%d %H:%M" 2>/dev/null)
+    printf '  %s %-28s' "$mark" "$n"
+    [ -n "$when" ] && printf ' %s' "$when"
+    [ -n "$sdir" ] && printf ' 📁 %s' "$sdir"
+    [ -n "$sid" ]  && printf ' [%s]' "$sid"
+    printf '\n'
+  }
   # 起動中 (.pipe あり)
   for p in "$STATE"/*.pipe; do
     n=$(basename "$p" .pipe); seen[$n]=1; found=1
-    sessf="$STATE/$n.session"; sid=""
-    [ -f "$sessf" ] && { read -r sid < "$sessf"; }
-    [ -n "$sid" ] && echo "  ● $n  (running, session: $sid)" || echo "  ● $n  (running)"
+    print_entry "●" "$n"
   done
-  # 停止済みだが再開可能 (.session のみ残存)
+  # 停止済みだが再開可能 (.session のみ残存) → resume <name> で復元
   for sessf in "$STATE"/*.session; do
     n=$(basename "$sessf" .session)
     [ -n "${seen[$n]:-}" ] && continue
-    read -r sid < "$sessf"
-    echo "  ○ $n  (stopped → resume $n, session: $sid)"
-    found=1
+    print_entry "○" "$n"; found=1
   done
   [ "$found" = 0 ] && echo "  (セッションなし)" || true
 }
