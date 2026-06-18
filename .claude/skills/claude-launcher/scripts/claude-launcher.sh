@@ -67,6 +67,10 @@ cmd_launch() {
   # --resume <id> は既存 ID をそのまま記録。--continue は直近会話なので ID を事前確定できない。
   local sid="" sid_opt=""
   if [ -z "$resume_opt" ]; then
+    if [ -f "$sessf" ]; then
+      local old_sid; read -r old_sid < "$sessf"
+      echo "WARN: '$name' に既存 session $old_sid あり。新規起動で上書きします (再開なら: resume $name)" >&2
+    fi
     sid="$(gen_uuid)"
     [ -n "$sid" ] && sid_opt="--session-id $sid"
   elif [[ "$resume_opt" == "--resume "* ]]; then
@@ -122,14 +126,23 @@ cmd_log() {
 cmd_list() {
   shopt -s nullglob
   local found=0 p n sid sessf
+  declare -A seen
+  # 起動中 (.pipe あり)
   for p in "$STATE"/*.pipe; do
-    n=$(basename "$p" .pipe)
+    n=$(basename "$p" .pipe); seen[$n]=1; found=1
     sessf="$STATE/$n.session"; sid=""
     [ -f "$sessf" ] && { read -r sid < "$sessf"; }
-    [ -n "$sid" ] && echo "  $n  (session: $sid)" || echo "  $n"
+    [ -n "$sid" ] && echo "  ● $n  (running, session: $sid)" || echo "  ● $n  (running)"
+  done
+  # 停止済みだが再開可能 (.session のみ残存)
+  for sessf in "$STATE"/*.session; do
+    n=$(basename "$sessf" .session)
+    [ -n "${seen[$n]:-}" ] && continue
+    read -r sid < "$sessf"
+    echo "  ○ $n  (stopped → resume $n, session: $sid)"
     found=1
   done
-  [ "$found" = 0 ] && echo "  (起動中セッションなし)" || true
+  [ "$found" = 0 ] && echo "  (セッションなし)" || true
 }
 
 cmd_stop() {
