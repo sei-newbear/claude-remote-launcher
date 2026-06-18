@@ -16,7 +16,8 @@ mkdir -p "$STATE"
 usage() {
   cat <<USAGE
 Usage:
-  claude-launcher.sh launch <name> [dir]   起動 (dir 既定=\$PWD): claude --remote-control <name> を pty+FIFO で
+  claude-launcher.sh launch <name> [dir] [--continue | --resume <id>]  起動 (dir 既定=\$PWD)
+                                           --continue: 直前の会話を自動再開 / --resume: session ID で再開
   claude-launcher.sh send   <name> <text>  起動中セッションにプロンプト送信 (Enter 付き)
   claude-launcher.sh log    <name>         セッションの画面ログ (制御コード除去) を表示
   claude-launcher.sh list                  起動中セッション一覧
@@ -31,8 +32,24 @@ validate_name() {
 }
 
 cmd_launch() {
-  local name="$1" dir="${2:-$PWD}"
+  local name="$1"; shift
   validate_name "$name"
+  local dir="$PWD" resume_opt=""
+  # dir (位置引数) と再開フラグ (--continue / --resume <id>) をパース
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --continue)
+        [ -z "$resume_opt" ] || { echo "ERROR: --continue と --resume は併用不可" >&2; exit 1; }
+        resume_opt="--continue"; shift;;
+      --resume)
+        [ -z "$resume_opt" ] || { echo "ERROR: --continue と --resume は併用不可" >&2; exit 1; }
+        [ -n "${2:-}" ] || { echo "ERROR: --resume には session ID が必要" >&2; exit 1; }
+        validate_name "$2"   # シェル文字列に埋め込むのでインジェクション防止に検証
+        resume_opt="--resume $2"; shift 2;;
+      --*) echo "ERROR: 不明なオプション: $1" >&2; exit 1;;
+      *) dir="$1"; shift;;
+    esac
+  done
   require script; require claude; require setsid
   local fifo="$STATE/$name.pipe"
   local log="$STATE/$name.log"
@@ -43,7 +60,7 @@ cmd_launch() {
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   # pty を与えて claude を detached 起動。stdin は FIFO、画面は log に記録
-  setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
+  setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude $resume_opt --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
   echo "launched '$name' (dir=$dir)"
