@@ -43,7 +43,7 @@ cmd_launch() {
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   # pty を与えて claude を detached 起動。stdin は FIFO、画面は log に記録
-  setsid bash -c "cd '$dir' && exec script -qfc 'claude --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
+  setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
   echo "launched '$name' (dir=$dir)"
