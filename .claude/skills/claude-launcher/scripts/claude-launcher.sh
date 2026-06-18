@@ -18,14 +18,21 @@ usage() {
 Usage:
   claude-launcher.sh launch <name> [dir] [--continue | --resume <id>]  起動 (dir 既定=\$PWD)
                                            --continue: 直前の会話を自動再開 / --resume: session ID で再開
+  claude-launcher.sh resume <name>         保存済み session ID で <name> を同じ dir で再開 (UUID 不要)
   claude-launcher.sh send   <name> <text>  起動中セッションにプロンプト送信 (Enter 付き)
   claude-launcher.sh log    <name>         セッションの画面ログ (制御コード除去) を表示
-  claude-launcher.sh list                  起動中セッション一覧
-  claude-launcher.sh stop   <name>         /exit で graceful 終了を試み、タイムアウトなら kill。log は残す
+  claude-launcher.sh list                  起動中セッション一覧 (保存済み session ID も表示)
+  claude-launcher.sh stop   <name>         /exit で graceful 終了を試み、タイムアウトなら kill。log/session は残す
 USAGE
 }
 
 require() { command -v "$1" >/dev/null || { echo "ERROR: '$1' が必要" >&2; exit 1; }; }
+
+gen_uuid() {
+  if command -v uuidgen >/dev/null; then uuidgen
+  elif [ -r /proc/sys/kernel/random/uuid ]; then cat /proc/sys/kernel/random/uuid
+  else echo ""; fi
+}
 
 validate_name() {
   [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ERROR: name は英数字・ハイフン・アンダースコアのみ使えます: '$1'" >&2; exit 1; }
@@ -54,18 +61,44 @@ cmd_launch() {
   local fifo="$STATE/$name.pipe"
   local log="$STATE/$name.log"
   local pidf="$STATE/$name.pids"
+  local sessf="$STATE/$name.session"
   [ -e "$fifo" ] && { echo "ERROR: '$name' は既に存在。先に stop して下さい" >&2; exit 1; }
+  # session ID を確定させる。新規起動は UUID を自前生成して --session-id で固定 → 後で再開できる。
+  # --resume <id> は既存 ID をそのまま記録。--continue は直近会話なので ID を事前確定できない。
+  local sid="" sid_opt=""
+  if [ -z "$resume_opt" ]; then
+    sid="$(gen_uuid)"
+    [ -n "$sid" ] && sid_opt="--session-id $sid"
+  elif [[ "$resume_opt" == "--resume "* ]]; then
+    sid="${resume_opt#--resume }"
+  fi
   mkfifo "$fifo"
   # 書き込み側を開けっ放しにして EOF を防ぐ holder (setsid で独立セッション=グループリーダー)
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   # pty を与えて claude を detached 起動。stdin は FIFO、画面は log に記録
-  setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude $resume_opt --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
+  setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude $resume_opt $sid_opt --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
+  # session ID と dir を保存 → 'resume <name>' / '--resume <id>' で復元できる (1行目=ID, 2行目=dir)
+  [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$dir" > "$sessf"
   echo "launched '$name' (dir=$dir)"
   echo "  log : $log"
+  [ -n "$sid" ] && echo "  session : $sid  (再開: claude-launcher.sh resume $name)"
+  [ -z "$sid" ] && echo "  session : (--continue のため ID 未記録。再開は --resume <id> で)"
   echo "  起動まで数秒。'claude-launcher.sh log $name' で 'Remote Control active' を確認 → モバイルから接続可"
+}
+
+cmd_resume() {
+  local name="$1"
+  validate_name "$name"
+  local sessf="$STATE/$name.session"
+  [ -f "$sessf" ] || { echo "ERROR: '$name' の保存済み session がありません: $sessf" >&2; exit 1; }
+  local sid sdir
+  { read -r sid; read -r sdir; } < "$sessf"
+  [ -n "$sid" ] || { echo "ERROR: session ファイルに ID がありません: $sessf" >&2; exit 1; }
+  [ -n "$sdir" ] || sdir="$PWD"
+  cmd_launch "$name" "$sdir" --resume "$sid"
 }
 
 cmd_send() {
@@ -88,8 +121,14 @@ cmd_log() {
 
 cmd_list() {
   shopt -s nullglob
-  local found=0 p n
-  for p in "$STATE"/*.pipe; do n=$(basename "$p" .pipe); echo "  $n"; found=1; done
+  local found=0 p n sid sessf
+  for p in "$STATE"/*.pipe; do
+    n=$(basename "$p" .pipe)
+    sessf="$STATE/$n.session"; sid=""
+    [ -f "$sessf" ] && { read -r sid < "$sessf"; }
+    [ -n "$sid" ] && echo "  $n  (session: $sid)" || echo "  $n"
+    found=1
+  done
   [ "$found" = 0 ] && echo "  (起動中セッションなし)" || true
 }
 
@@ -121,15 +160,20 @@ cmd_stop() {
     local p
     for p in $(cat "$pidf"); do kill -- "-$p" 2>/dev/null || true; done
   fi
+  # .session は残す (再開ポイント)。pipe/pids だけ片付ける。
   rm -f "$fifo" "$pidf"
   echo "stopped '$name'"
   [ -f "$log" ] && echo "  log : $log"
+  local sessf="$STATE/$name.session" sid=""
+  [ -f "$sessf" ] && { read -r sid < "$sessf"; }
+  [ -n "$sid" ] && echo "  session : $sid  (再開: claude-launcher.sh resume $name)"
 }
 
 [ $# -ge 1 ] || { usage; exit 1; }
 sub="$1"; shift || true
 case "${sub:-}" in
   launch) [ $# -ge 1 ] || { usage; exit 1; }; cmd_launch "$@";;
+  resume) [ $# -ge 1 ] || { usage; exit 1; }; cmd_resume "$@";;
   send)   [ $# -ge 2 ] || { usage; exit 1; }; cmd_send "$@";;
   log)    [ $# -ge 1 ] || { usage; exit 1; }; cmd_log "$@";;
   list)   cmd_list;;
