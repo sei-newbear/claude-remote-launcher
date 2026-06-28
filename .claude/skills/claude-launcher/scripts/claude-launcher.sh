@@ -81,6 +81,11 @@ cmd_launch() {
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   # pty を与えて claude を detached 起動。stdin は FIFO、画面は log に記録
+  # 注意1: env -u は必須。親が claude セッション内だと CLAUDE_CODE_CHILD_SESSION /
+  #   CLAUDE_CODE_SESSION_ID を継ぎ、子が「親の子セッション」扱いされて standalone な
+  #   JSONL transcript を書かない → resume も効かなくなる。この2変数だけ外す(他は維持)。
+  # 注意2: env の直後に exec を付けないこと。exec はシェルビルトインで env からは
+  #   コマンドとして見えず env: 'exec': No such file or directory で即死する。env 自身が exec する。
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID script -qfc 'claude $resume_opt $sid_opt --remote-control $name --permission-mode auto' '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
