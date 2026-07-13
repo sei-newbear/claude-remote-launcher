@@ -97,7 +97,7 @@ _launch_new() {
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-    script -qfc 'claude $resume_opt --session-id $uuid --remote-control $name --permission-mode auto' \
+    script -qfc 'claude $resume_opt --session-id $uuid --name $name --remote-control $name --permission-mode auto' \
     '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
