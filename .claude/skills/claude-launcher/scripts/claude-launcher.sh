@@ -58,6 +58,14 @@ resolve() {
       is_uuid "$b" && [[ "$b" == "$key"* ]] && echo "$b" && return
     done
   fi
+  # 名前 → 起動中プロセスの --session-id から逆引き
+  local pid uuid
+  pid=$(ps -eo pid,comm,args | awk -v n="$key" \
+    '$2=="claude" && $0 ~ ("remote-control " n "([[:space:]]|$)") {print $1; exit}')
+  if [ -n "$pid" ]; then
+    uuid=$(ps -o args= -p "$pid" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="--session-id"){print $(i+1); exit}}')
+    [ -n "$uuid" ] && echo "$uuid" && return
+  fi
   echo "$key"  # 旧式名をそのまま返す
 }
 
