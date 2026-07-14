@@ -84,7 +84,7 @@ claude_pid() {
 
 # ── 新式起動 (UUID primary key) ──────────────────────────────────────────────
 _launch_new() {
-  local name="$1" dir="$2" uuid="$3" resume_opt="${4:-}"
+  local name="$1" dir="$2" uuid="$3"
   local fifo="$STATE/$uuid.pipe"
   local log="$STATE/$uuid.log"
   local pidf="$STATE/$uuid.pids"
@@ -96,10 +96,8 @@ _launch_new() {
   mkfifo "$fifo"
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
-  local sid_opt="--session-id $uuid"
-  [[ "$resume_opt" == "--resume "* ]] && sid_opt=""
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-    script -qfc 'claude $resume_opt $sid_opt --name $name --remote-control $name --permission-mode auto' \
+    script -qfc 'claude --session-id $uuid --name $name --remote-control $name --permission-mode auto' \
     '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
@@ -183,7 +181,7 @@ cmd_launch() {
     uuid="$(gen_uuid)"
   fi
 
-  _launch_new "$name" "$dir" "$uuid" "$resume_opt"
+  _launch_new "$name" "$dir" "$uuid"
 }
 
 cmd_resume() {
@@ -195,7 +193,7 @@ cmd_resume() {
     [ -f "$dirf" ] || { echo "ERROR: '$uuid' の dir 情報がありません: $dirf" >&2; exit 1; }
     local dir; read -r dir < "$dirf"
     local rcname; rcname=$(basename "$dir")
-    _launch_new "$rcname" "$dir" "$uuid" "--resume $uuid"
+    _launch_new "$rcname" "$dir" "$uuid"
   else
     # 旧式: <name>.session から再開
     local name="$key"
