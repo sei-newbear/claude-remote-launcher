@@ -96,8 +96,10 @@ _launch_new() {
   mkfifo "$fifo"
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
+  local sid_opt="--session-id $uuid"
+  [[ "$resume_opt" == "--resume "* ]] && sid_opt=""
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-    script -qfc 'claude $resume_opt --session-id $uuid --name $name --remote-control $name --permission-mode auto' \
+    script -qfc 'claude $resume_opt $sid_opt --name $name --remote-control $name --permission-mode auto' \
     '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
