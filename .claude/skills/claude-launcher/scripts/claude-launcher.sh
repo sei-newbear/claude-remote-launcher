@@ -75,7 +75,10 @@ get_name() {
   local pkey; pkey=$(echo "$dir" | sed 's|/|-|g')
   local jsonl="$HOME/.claude/projects/$pkey/$uuid.jsonl"
   [ -f "$jsonl" ] || { echo ""; return; }
-  grep '"type":"custom-title"' "$jsonl" 2>/dev/null | tail -1 | jq -r '.customTitle // empty' 2>/dev/null || echo ""
+  local name
+  name=$(grep '"type":"custom-title"' "$jsonl" 2>/dev/null | tail -1 | jq -r '.customTitle // empty' 2>/dev/null)
+  [ -z "$name" ] && name=$(grep '"type":"ai-title"' "$jsonl" 2>/dev/null | tail -1 | jq -r '.aiTitle // empty' 2>/dev/null)
+  echo "${name:-}"
 }
 
 # PID 取得: UUID → --session-id で検索 / 旧式名 → --remote-control で検索
