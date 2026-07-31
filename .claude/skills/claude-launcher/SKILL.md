@@ -19,9 +19,10 @@ description: Launch and drive a background, mobile-accessible Claude Code sessio
 
 スクリプト `.claude/skills/claude-launcher/scripts/claude-launcher.sh` を呼ぶ:
 
-- 起動: `.claude/skills/claude-launcher/scripts/claude-launcher.sh launch <名前> [作業dir] [--continue | --resume <id>]`
+- 起動: `.claude/skills/claude-launcher/scripts/claude-launcher.sh launch <名前> [作業dir] --model <モデル> [--continue | --resume <id>]`
+  - `--model` は**必須**(例: `sonnet` / `opus` / `claude-opus-4-8` など)。やることに応じてモデルを都度選ぶ運用のため省略不可
   - `--continue` で直前の会話を自動再開 / `--resume <id>` で session ID 指定で再開
-- 再開: `.claude/skills/claude-launcher/scripts/claude-launcher.sh resume <名前>`(保存済み session ID で同じ dir で再開。UUID 不要)
+- 再開: `.claude/skills/claude-launcher/scripts/claude-launcher.sh resume <名前> [--model <モデル>]`(保存済み session ID で同じ dir で再開。UUID 不要。`--model` で再開時にモデルを変更可)
 - 送信: `.claude/skills/claude-launcher/scripts/claude-launcher.sh send <名前> "プロンプト"`
 - 応答確認: `.claude/skills/claude-launcher/scripts/claude-launcher.sh log <名前>`(画面ログを制御コード除去して表示)
 - 一覧: `.claude/skills/claude-launcher/scripts/claude-launcher.sh list`

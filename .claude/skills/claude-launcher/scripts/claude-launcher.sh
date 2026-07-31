@@ -19,9 +19,11 @@ UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 usage() {
   cat <<USAGE
 Usage:
-  claude-launcher.sh launch <name> [dir] [--continue | --resume <uuid>]  起動 (dir 既定=\$PWD)
+  claude-launcher.sh launch <name> [dir] --model <model> [--continue | --resume <uuid>]
+                                           起動 (dir 既定=\$PWD)
+                                           --model: 必須。claude起動時のモデルを指定 (例: sonnet, opus, claude-opus-4-8)
                                            --continue: 直前の会話を自動再開 / --resume: UUID で再開
-  claude-launcher.sh resume <uuid>         停止済みセッションを uuid で再開
+  claude-launcher.sh resume <uuid> [--model <model>]  停止済みセッションを uuid で再開
   claude-launcher.sh send   <uuid> <text>  起動中セッションにプロンプト送信 (Enter 付き)
   claude-launcher.sh log    <uuid>         セッションの画面ログ (制御コード除去) を表示
   claude-launcher.sh list                  セッション一覧
@@ -43,6 +45,10 @@ is_uuid() { [[ "$1" =~ $UUID_RE ]]; }
 
 validate_name() {
   [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ERROR: name は英数字・ハイフン・アンダースコアのみ: '$1'" >&2; exit 1; }
+}
+
+validate_model() {
+  [[ "$1" =~ ^[a-zA-Z0-9_.-]+$ ]] || { echo "ERROR: model は英数字・ハイフン・アンダースコア・ドットのみ: '$1'" >&2; exit 1; }
 }
 
 # key (UUID / UUID前方一致 / 旧式名) → ファイルベース名として使う文字列を返す
@@ -95,7 +101,7 @@ claude_pid() {
 
 # ── 新式起動 (UUID primary key) ──────────────────────────────────────────────
 _launch_new() {
-  local name="$1" dir="$2" uuid="$3"
+  local name="$1" dir="$2" uuid="$3" model="${4:-}"
   local fifo="$STATE/$uuid.pipe"
   local log="$STATE/$uuid.log"
   local pidf="$STATE/$uuid.pids"
@@ -103,17 +109,21 @@ _launch_new() {
 
   [ -e "$fifo" ] && { echo "ERROR: '$uuid' は既に起動中" >&2; exit 1; }
 
+  local model_opt=""
+  [ -n "$model" ] && model_opt="--model $model"
+
   echo "$dir" > "$dirf"
   mkfifo "$fifo"
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-    script -qfc 'claude --session-id $uuid --name $name --remote-control $name --permission-mode auto' \
+    script -qfc 'claude --session-id $uuid --name $name $model_opt --remote-control $name --permission-mode auto' \
     '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
 
   echo "launched '$name' (dir=$dir)"
+  [ -n "$model" ] && echo "  model: $model"
   echo "  log  : $log"
   echo "  uuid : $uuid  (再開: claude-launcher.sh resume $uuid)"
   echo "  起動まで数秒。'claude-launcher.sh log $uuid' で 'Remote Control active' を確認 → モバイルから接続可"
@@ -121,7 +131,7 @@ _launch_new() {
 
 # ── 旧式起動 (name primary key) ─ --continue 用および後方互換 ─────────────────
 _launch_old() {
-  local name="$1" dir="$2" resume_opt="${3:-}"
+  local name="$1" dir="$2" resume_opt="${3:-}" model="${4:-}"
   local fifo="$STATE/$name.pipe"
   local log="$STATE/$name.log"
   local pidf="$STATE/$name.pids"
@@ -141,17 +151,21 @@ _launch_old() {
     sid="${resume_opt#--resume }"
   fi
 
+  local model_opt=""
+  [ -n "$model" ] && model_opt="--model $model"
+
   mkfifo "$fifo"
   setsid bash -c "exec sleep infinity > '$fifo'" >/dev/null 2>&1 &
   local hpid=$!
   setsid bash -c "cd '$dir' && env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-    script -qfc 'claude $resume_opt $sid_opt --remote-control $name --permission-mode auto' \
+    script -qfc 'claude $resume_opt $sid_opt $model_opt --remote-control $name --permission-mode auto' \
     '$log' < '$fifo'" >/dev/null 2>&1 &
   local spid=$!
   echo "$hpid $spid" > "$pidf"
   [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$dir" > "$sessf"
 
   echo "launched '$name' (dir=$dir)"
+  [ -n "$model" ] && echo "  model  : $model"
   echo "  log    : $log"
   [ -n "$sid" ] && echo "  session: $sid  (再開: claude-launcher.sh resume $name)"
   [ -z "$sid"  ] && echo "  session: (--continue のため ID 未記録。再開は --resume <id> で)"
@@ -161,7 +175,7 @@ _launch_old() {
 cmd_launch() {
   local name="$1"; shift
   validate_name "$name"
-  local dir="$PWD" resume_opt=""
+  local dir="$PWD" resume_opt="" model=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --continue)
@@ -172,15 +186,20 @@ cmd_launch() {
         [ -n "${2:-}" ] || { echo "ERROR: --resume には UUID が必要" >&2; exit 1; }
         validate_name "$2"
         resume_opt="--resume $2"; shift 2;;
+      --model)
+        [ -n "${2:-}" ] || { echo "ERROR: --model にはモデル名が必要" >&2; exit 1; }
+        validate_model "$2"
+        model="$2"; shift 2;;
       --*) echo "ERROR: 不明なオプション: $1" >&2; exit 1;;
       *) dir="$1"; shift;;
     esac
   done
+  [ -n "$model" ] || { echo "ERROR: --model は必須です (例: --model opus / --model sonnet)" >&2; exit 1; }
   require script; require claude; require setsid
 
   # --continue は UUID を事前確定できないため旧式で起動
   if [[ "$resume_opt" == "--continue" ]]; then
-    _launch_old "$name" "$dir" "$resume_opt"
+    _launch_old "$name" "$dir" "$resume_opt" "$model"
     return
   fi
 
@@ -192,11 +211,22 @@ cmd_launch() {
     uuid="$(gen_uuid)"
   fi
 
-  _launch_new "$name" "$dir" "$uuid"
+  _launch_new "$name" "$dir" "$uuid" "$model"
 }
 
 cmd_resume() {
-  local key="$1"
+  local key="$1"; shift
+  local model=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --model)
+        [ -n "${2:-}" ] || { echo "ERROR: --model にはモデル名が必要" >&2; exit 1; }
+        validate_model "$2"
+        model="$2"; shift 2;;
+      --*) echo "ERROR: 不明なオプション: $1" >&2; exit 1;;
+      *) echo "ERROR: 不明な引数: $1" >&2; exit 1;;
+    esac
+  done
   local uuid; uuid=$(resolve "$key")
 
   if is_uuid "$uuid"; then
@@ -204,7 +234,7 @@ cmd_resume() {
     [ -f "$dirf" ] || { echo "ERROR: '$uuid' の dir 情報がありません: $dirf" >&2; exit 1; }
     local dir; read -r dir < "$dirf"
     local rcname; rcname=$(basename "$dir")
-    _launch_new "$rcname" "$dir" "$uuid"
+    _launch_new "$rcname" "$dir" "$uuid" "$model"
   else
     # 旧式: <name>.session から再開
     local name="$key"
@@ -214,7 +244,7 @@ cmd_resume() {
     { read -r sid; read -r sdir; } < "$sessf"
     [ -n "$sid" ]  || { echo "ERROR: session ファイルに ID がありません: $sessf" >&2; exit 1; }
     [ -n "$sdir" ] || sdir="$PWD"
-    _launch_old "$name" "$sdir" "--resume $sid"
+    _launch_old "$name" "$sdir" "--resume $sid" "$model"
   fi
 }
 
